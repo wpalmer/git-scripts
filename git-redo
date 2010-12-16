@@ -1,0 +1,13 @@
+#!/bin/bash
+#PURPOSE: re-apply changes across very similar files (eg: changes to boilerplate)
+if [ $# -ne 2 ]; then
+	echo "Usage: git redo <file with changes> <file to re-apply changes to>" >&2
+	exit 1
+fi
+changes_from="$1"
+changes_to="$2"
+
+tmp="$(tempfile)"
+git cat "$changes_from" > "$tmp"
+merge "$changes_to" "$tmp" "$changes_from"
+rm -f "$tmp"
