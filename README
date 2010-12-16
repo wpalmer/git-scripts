@@ -1,0 +1,8 @@
+These scripts are quick & dirty hacks, made public because there is no
+reason for them to be private.
+
+To the extent which I am permitted by law, I release these scripts into
+the public domain. I do not consider them suitable for inclusion into
+the main git project (otherwise they would be sent as patches, not
+dumped lamely into a public repository), but if someone else cleans them
+up, I will not act to prevent their inclusion.
