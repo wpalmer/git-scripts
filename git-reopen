@@ -1,0 +1,40 @@
+#!/bin/bash
+#PURPOSE: re-open recently edited files
+cdup="$(git rev-parse --show-cdup)"
+
+status=
+oldname=
+{
+	if { git diff --name-status; git diff --cached --name-status; } | grep -q '^[AMR]'; then
+		git diff -z --cached --name-status
+		git diff -z --name-status
+	else
+		git log -z --pretty=format: -1 --name-status
+	fi
+} | while read -d $'\0' part; do 
+	if [ -z "$status" ]; then
+		status="$part"
+		continue
+	fi
+	if [ -z "$oldname" ]; then
+		if [ "$status" = "${status#R}" ]; then
+			#status does not begin with "R", so there is only one name
+			if [ \
+				"$status" != "${status#A}" -o \
+				"$status" != "${status#M}" \
+			]; then
+				#status begins with A or M
+				echo "$cdup$part"
+			fi
+			status=
+			continue
+		fi
+		oldname="$part"
+		continue
+	fi
+	echo "$cdup$part"
+	status=
+	oldname=
+done | while read path; do
+	"${EDITOR-gvim}" "$path"
+done
