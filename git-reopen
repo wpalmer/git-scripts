@@ -2,10 +2,13 @@
 #PURPOSE: re-open recently edited files
 cdup="$(git rev-parse --show-cdup)"
 
+HEAD="$1"
 status=
 oldname=
 {
-	if { git diff --name-status; git diff --cached --name-status; } | grep -q '^[AMR]'; then
+	if [ -n "$HEAD" ]; then
+		git log -z --pretty=format: -1 --name-status "$HEAD"
+	elif { git diff --name-status; git diff --cached --name-status; } | grep -q '^[AMR]'; then
 		git diff -z --cached --name-status
 		git diff -z --name-status
 	else
