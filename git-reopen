@@ -5,9 +5,14 @@ cdup="$(git rev-parse --show-cdup)"
 HEAD="$1"
 status=
 oldname=
+
 {
 	if [ -n "$HEAD" ]; then
-		git log -z --pretty=format: -1 --name-status "$HEAD"
+		if echo "$HEAD" | grep -q '\.\.'; then
+			git log -z --pretty=format: --name-status "$HEAD"
+		else
+			git log -z --pretty=format: -1 --name-status "$HEAD"
+		fi
 	elif { git diff --name-status; git diff --cached --name-status; } | grep -q '^[AMR]'; then
 		git diff -z --cached --name-status
 		git diff -z --name-status
@@ -38,6 +43,6 @@ oldname=
 	echo "$cdup$part"
 	status=
 	oldname=
-done | while read path; do
+done | sort -u | while read path; do
 	"${EDITOR-gvim}" "$path"
 done
