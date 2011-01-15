@@ -257,5 +257,5 @@ function _restore(){
 trap _restore EXIT SIGHUP SIGINT SIGQUIT SIGTERM || exit 1
 
 git reset -q --hard refs/tags/partial || exit 1
-svn commit "$@" || exit 1
+svn commit "${files[@]}" || exit 1
 exit 0
