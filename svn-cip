@@ -125,7 +125,7 @@ git reset -q "$(
     {
         sed 's/^\s*//' <<COMMIT
             tree $(git write-tree)
-            parent $(git rev-parse HEAD)
+            parent $(git rev-parse refs/tags/base)
             author nobody <nobody@nowhere> $(date +'%s %z')
             committer nobody <nobody@nowhere> $(date +'%s %z')
 
@@ -141,7 +141,7 @@ git reset -q "$(
     {
         sed 's/^\s*//' <<COMMIT
             tree $(git write-tree)
-            parent $(git rev-parse HEAD)
+            parent $(git rev-parse refs/tags/base)
             author nobody <nobody@nowhere> $(date +'%s %z')
             committer nobody <nobody@nowhere> $(date +'%s %z')
 
@@ -152,28 +152,76 @@ COMMIT
 git tag full || exit 1
 
 if git diff --quiet refs/tags/base refs/tags/partial; then
-    echo "No changes to commit" >&2
+    echo "No changes to commit." >&2
     exit 1
 fi
 
 #confirm with user that this is ok, eg: output diffs which will actually be sent
 while true; do
-    read -p 'Are you sure you wish to continue [y,n,e,?]? ' response
+    read -p 'Are you sure you wish to continue [y,n,a,r,q,e,?]? ' response
     case "$response" in
         y|ye|yes)
+            if git diff --quiet refs/tags/base refs/tags/partial; then
+                echo "No changes to commit." >&2
+                exit 1
+            fi
             break
             ;;
         n|no|q|qu|qui|quit)
             exit 0
             ;;
         e|ex|exa|exam|exami|examin|examine)
-            git diff refs/tags/base refs/tags/partial
+            if git diff --quiet refs/tags/base refs/tags/partial; then
+                echo "No changes to commit."
+            else
+                git diff refs/tags/base refs/tags/partial
+            fi
+            continue
+            ;;
+        r|re|rem|remo|remov|remove)
+            git reset -q refs/tags/partial &&
+            git reset -q --soft refs/tags/base &&
+            git reset --patch &&
+            git reset -q "$(
+                {
+                    sed 's/^\s*//' <<COMMIT
+                        tree $(git write-tree)
+                        parent $(git rev-parse refs/tags/base)
+                        author nobody <nobody@nowhere> $(date +'%s %z')
+                        committer nobody <nobody@nowhere> $(date +'%s %z')
+
+                        PARTIAL
+COMMIT
+                } | git hash-object -t commit -w --stdin
+            )" &&
+            git update-ref refs/tags/partial HEAD || exit 1
+            continue
+            ;;
+        a|ad|add)
+            git reset -q refs/tags/partial &&
+            git reset -q --soft refs/tags/base &&
+            git add --patch &&
+            git reset -q "$(
+                {
+                    sed 's/^\s*//' <<COMMIT
+                        tree $(git write-tree)
+                        parent $(git rev-parse refs/tags/base)
+                        author nobody <nobody@nowhere> $(date +'%s %z')
+                        committer nobody <nobody@nowhere> $(date +'%s %z')
+
+                        PARTIAL
+COMMIT
+                } | git hash-object -t commit -w --stdin
+            )" &&
+            git update-ref refs/tags/partial HEAD || exit 1
             continue
             ;;
         *)
             sed 's/^\s*//' <<HELP
                 y - yes, commit changes to svn
                 n - no, exit
+                a - add more changes to the commit
+                r - remove changes from the commit
                 q - quit (same as "no")
                 e - examine changes to be committed
                 ? - print help
