@@ -45,7 +45,28 @@ function longest_common_prefix(){
 	PERL
 }
 
-common="$(for file in "$@"; do
+files=()
+if [ $# -eq 0 ]; then
+    parent="$(readlink -fn .)"
+    [ -d "$parent/.svn" ] || {
+        echo "Not an SVN directory." >&2
+        exit 1
+    }
+
+    while [ -d "$parent/.svn" ]; do
+        top="$parent"
+        parent="$(dirname "$parent")"
+    done
+    cd "$top"
+    oldIFS="$IFS"
+    IFS=$'\n'
+    files=( $(svn st | sed -n 's/^M.......//p') ) || exit 1
+    IFS="$oldIFS"
+else
+    files=("$@")
+fi
+
+common="$(for file in "${files[@]}"; do
 	readlink -fn "$file"
 	echo -en '\0'
 done | longest_common_prefix /)"
@@ -105,7 +126,7 @@ function update_index(){
     git update-index --add --cacheinfo '100644' "$hash" "$file" || exit 1
 }
 
-filepaths "$@" | while read -d $'\0' file; do
+filepaths "${files[@]}" | while read -d $'\0' file; do
     update_index hash_svn_base "$file" || exit 1
 done &&
 git reset -q "$(
@@ -134,7 +155,7 @@ COMMIT
     } | git hash-object -t commit -w --stdin
 )" &&
 git tag partial &&
-filepaths "$@" | while read -d $'\0' file; do
+filepaths "${files[@]}" | while read -d $'\0' file; do
     update_index hash_file "$file" || exit 1
 done &&
 git reset -q "$(
