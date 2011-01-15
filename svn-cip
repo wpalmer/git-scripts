@@ -81,7 +81,7 @@ common="$(
 
 [ -d $common ] || common="$(dirname "$common")"
 
-GIT_DIR="$(mktemp -d)" || exit 1
+GIT_DIR="$(mktemp -d --tmpdir "svn-cip$([ "$common" = "/" ] || echo ".$(basename "$common")" ).XXXXXXXXXX")" || exit 1
 function _cleanup(){
 	rm -rf "$GIT_DIR"
 }
