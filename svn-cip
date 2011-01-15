@@ -66,6 +66,20 @@ else
     files=("$@")
 fi
 
+for file in "${files[@]}"; do
+    if [ -d "$file" ]; then
+        [ -d "$file/.svn" ] || {
+            echo "'$file' is not a working copy" >&2
+            exit 1
+        }
+    else
+        [ -d "$(dirname "$file")/.svn" ] || {
+            echo "'$file' is not controlled by svn" >&2
+            exit 1
+        }
+    fi
+done
+
 common="$(for file in "${files[@]}"; do
 	readlink -fn "$file"
 	echo -en '\0'
