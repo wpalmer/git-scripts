@@ -140,50 +140,36 @@ function update_index(){
     git update-index --add --cacheinfo '100644' "$hash" "$file" || exit 1
 }
 
-filepaths "${files[@]}" | while read -d $'\0' file; do
-    update_index hash_svn_base "$file" || exit 1
-done &&
-git reset -q "$(
-    {
-        sed 's/^\s*//' <<COMMIT
-            tree $(git write-tree)
-            author nobody <nobody@nowhere> $(date +'%s %z')
-            committer nobody <nobody@nowhere> $(date +'%s %z')
+function commit(){
+    local tree="$1"
+    local parent="$2"
+    local date="$(date +'%s %z')"
 
-            BASE
-COMMIT
-    } | git hash-object -t commit -w --stdin
-)" &&
-git tag base &&
-git add --patch &&
-git reset -q "$(
+    [ -n "$parent" ] && parent="$(echo; echo "parent $parent")"
+
     {
         sed 's/^\s*//' <<COMMIT
-            tree $(git write-tree)
-            parent $(git rev-parse refs/tags/base)
-            author nobody <nobody@nowhere> $(date +'%s %z')
-            committer nobody <nobody@nowhere> $(date +'%s %z')
+            tree $tree$parent
+            author nobody <nobody@nowhere> $date
+            committer nobody <nobody@nowhere> $date
 
             PARTIAL
 COMMIT
     } | git hash-object -t commit -w --stdin
-)" &&
+}
+
+filepaths "${files[@]}" | while read -d $'\0' file; do
+    update_index hash_svn_base "$file" || exit 1
+done &&
+git reset -q "$(commit "$(git write-tree)")" &&
+git tag base &&
+git add --patch &&
+git reset -q "$(commit "$(git write-tree)" "$(git rev-parse refs/tags/base)")" &&
 git tag partial &&
 filepaths "${files[@]}" | while read -d $'\0' file; do
     update_index hash_file "$file" || exit 1
 done &&
-git reset -q "$(
-    {
-        sed 's/^\s*//' <<COMMIT
-            tree $(git write-tree)
-            parent $(git rev-parse refs/tags/base)
-            author nobody <nobody@nowhere> $(date +'%s %z')
-            committer nobody <nobody@nowhere> $(date +'%s %z')
-
-            FULL
-COMMIT
-    } | git hash-object -t commit -w --stdin
-)" &&
+git reset -q "$(commit "$(git write-tree)" "$(git rev-parse refs/tags/base)")" &&
 git tag full || exit 1
 
 if git diff --quiet refs/tags/base refs/tags/partial; then
@@ -217,18 +203,7 @@ while true; do
             git reset -q refs/tags/partial &&
             git reset -q --soft refs/tags/base &&
             git reset --patch &&
-            git reset -q "$(
-                {
-                    sed 's/^\s*//' <<COMMIT
-                        tree $(git write-tree)
-                        parent $(git rev-parse refs/tags/base)
-                        author nobody <nobody@nowhere> $(date +'%s %z')
-                        committer nobody <nobody@nowhere> $(date +'%s %z')
-
-                        PARTIAL
-COMMIT
-                } | git hash-object -t commit -w --stdin
-            )" &&
+            git reset -q "$(commit "$(git write-tree)" "$(git rev-parse refs/tags/base)")" &&
             git update-ref refs/tags/partial HEAD || exit 1
             continue
             ;;
@@ -236,18 +211,7 @@ COMMIT
             git reset -q refs/tags/partial &&
             git reset -q --soft refs/tags/base &&
             git add --patch &&
-            git reset -q "$(
-                {
-                    sed 's/^\s*//' <<COMMIT
-                        tree $(git write-tree)
-                        parent $(git rev-parse refs/tags/base)
-                        author nobody <nobody@nowhere> $(date +'%s %z')
-                        committer nobody <nobody@nowhere> $(date +'%s %z')
-
-                        PARTIAL
-COMMIT
-                } | git hash-object -t commit -w --stdin
-            )" &&
+            git reset -q "$(commit "$(git write-tree)" "$(git rev-parse refs/tags/base)")" &&
             git update-ref refs/tags/partial HEAD || exit 1
             continue
             ;;
