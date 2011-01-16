@@ -2,6 +2,81 @@
 # svn-cip, an svn equivalent for git add --patch
 # Usage:
 #  svn-cip <file> [<file> [...]]
+function usage(){
+    sed 's/^........//' <<USAGE
+        Usage: $(basename "$0") [--changelist <ARG>] [file [file...]]
+        Options:
+            --cl,--changelist <ARG>
+                Use the specified SVN changelist in addition to any specified files
+
+            --
+                Treat all further arguments as filenames
+
+            --help
+                Display this message and exit
+USAGE
+}
+
+function fully_qualify(){
+    local file="$1"
+    readlink -fn "$([ "${file#-}" = "$file" ]||echo -n './')$file"
+}
+
+if [ "$1" = "help" ]; then
+    if [ $# -gt 1 ]; then
+        echo "Subcommand 'help' doesn't accept option '$2'" >&2
+        echo "Type '$(basename "$0") help' for usage." >&2
+        exit 1
+    fi
+    usage
+    exit 0
+fi
+
+no_args=0
+changelists=()
+files=()
+while [ $# -gt 0 ]; do
+    if [ "$no_args" = "1" ]; then
+        files[${#files[@]}]="$(fully_qualify "$1")"
+        shift
+        continue
+    fi
+
+    case "$1" in
+        --cl|--changelist)
+                shift
+                changelist="$1"
+                if [ -z "$changelist" ]; then
+                    echo "Invalid changelist name '$changelist'" >&2
+                    exit 1
+                fi
+                changelists[${#changelists[@]}]="$changelist"
+            ;;
+        --cl=|--changelist=)
+                changelist="$(sed '1s/^[^=]*=//')"
+                if [ -z "$changelist" ]; then
+                    echo "Invalid changelist name '$changelist'" >&2
+                    exit 1
+                fi
+                changelists[${#changelists[@]}]="$changelist"
+            ;;
+        --help)
+                usage
+                exit 0
+            ;;
+        --)
+            no_args=1
+            ;;
+        -*)
+            echo "Unknown argument: $1" >&2
+            exit 1
+            ;;
+        *)
+            files[${#files[@]}]="$(fully_qualify "$1")"
+            ;;
+    esac
+    shift
+done
 
 # look through all files and determine topmost directory
 function longest_common_prefix(){
@@ -45,13 +120,18 @@ function longest_common_prefix(){
 	PERL
 }
 
-files=()
-if [ $# -eq 0 ]; then
-    parent="$(readlink -fn .)"
+if [ ${#files[@]} -eq 0 -o ${#changelists[@]} -gt 0 ]; then
+    parent="$(fully_qualify .)"
     [ -d "$parent/.svn" ] || {
         echo "Not an SVN directory." >&2
         exit 1
     }
+
+    changelist_args=()
+    for changelist in "${changelists[@]}"; do
+        changelist_args[${#changelist_args[@]}]="--cl"
+        changelist_args[${#changelist_args[@]}]="$changelist"
+    done
 
     while [ -d "$parent/.svn" ]; do
         top="$parent"
@@ -60,10 +140,13 @@ if [ $# -eq 0 ]; then
     cd "$top"
     oldIFS="$IFS"
     IFS=$'\n'
-    files=( $(svn st | sed -n 's/^M.......//p') ) || exit 1
+    echo -n "Generating changelist from 'svn st' output..." >&2
+    status_files=( $(svn st "${changelist_args[@]}" | sed -n 's/^M.......//p') ) || exit 1
     IFS="$oldIFS"
-else
-    files=("$@")
+    for file in "${status_files[@]}"; do
+        files[${#files[@]}]="$(fully_qualify "$file")"
+    done
+    echo " done." >&2
 fi
 
 for file in "${files[@]}"; do
@@ -80,8 +163,12 @@ for file in "${files[@]}"; do
     fi
 done
 
+for file in "${files[@]}"; do
+    files[${#files[@]}]="$(fully_qualify "$file")"
+done
+
 common="$(for file in "${files[@]}"; do
-	readlink -fn "$file"
+	echo -n "$file"
 	echo -en '\0'
 done | longest_common_prefix /)"
 common="$(
@@ -110,7 +197,7 @@ function filepaths(){
     local file
     local prefix
     for file in "$@"; do
-        file="$(readlink -fn "$file")"
+        file="$(fully_qualify "$file")"
         if [ "$common" = "/" ]; then
             file="${file:1}"
         else
