@@ -1,0 +1,201 @@
+#!/bin/sh
+# git-fudge-commit, tries to make a valid commit out of a partially or poorly specified commit object
+# the goal is to ease scripting by making it easier to create valid commit objects
+# Tweaks to a bad commit include:
+#   - fields are put into their usual order (tree, parents, author, committer, message)
+#   - tree and parents are run through rev-parse
+#   - parents are separated into one per parent line
+#   - author/committer name is seareched for as with --author=/--committer= in git log
+#   - date in author/committer lines is run trough strtotime if possible/required
+#   - the current date is used if no date is given
+#   - trailing whitespace is removed from commit message
+#   - leading/trailing blank lines are removed from commit message
+
+error_insane(){
+    echo "Unable to generate a sane commit: $1." >&2
+    exit 1
+}
+
+tree_line(){
+    local line="$1"
+    local rev
+    local num_lines
+    local tree
+
+    git rev-parse "${line#tree }" >/dev/null 2>&1 ||
+        error_insane "cannot parse tree parameter"
+
+    rev=`git rev-parse "${line#tree }"`
+    num_lines=`printf '%s\n' "$rev" | wc -l`
+    if [ -n "$rev" -a $num_lines -eq 1 ]; then
+        rev=`git rev-parse "$rev^{}"`
+        type=`git cat-file -t "$rev"`
+        if [ "$type" = "tree" ]; then
+            tree="$rev"
+        elif [ "$type" = "commit" ]; then
+            tree=`git rev-parse "$rev:"`
+        else
+            error_insane "no parameter could be converted into tree object"
+        fi
+    elif [ $num_lines -gt 1 ]; then
+        rev=`printf '%s' "$rev"|tr '\n' ' '`
+        rev=`git rev-list -2 $rev`
+        num_lines=`printf '%s\n' "$rev" | wc -l`
+        if [ $num_lines -gt 1 ]; then
+            error_insane "specified parameter resolves into multiple trees"
+        elif [ -z "$rev" -o $num_lines -lt 1 ]; then
+            error_insane "specified tree parameter does not resolve into an object"
+        fi
+        rev=`printf '%s' "$rev"|tr '\n' ' '`
+        tree=`git rev-parse "$rev:"`
+    else
+        error_insane "specified tree parameter does not resolve into an object"
+    fi
+    echo "$tree"
+}
+
+parent_line(){
+    local line="$1"
+    local rev
+    local parent=
+    local object
+    local type
+
+    git rev-parse ${line#parent } >/dev/null 2>&1 ||
+        error_insane "cannot parse parent parameter"
+
+    if git rev-parse ${line#parent }|grep -q '^\^'; then
+        error_insane "parent parameters must list individual parents "\
+                     "(commit ranges are not allowed)"
+    fi
+
+    for object in `git rev-parse ${line#parent}`; do
+        object=`git rev-parse "$object^{}"`
+        type=`git cat-file -t $object`
+        if [ "$type" = "commit" ]; then
+            if [ -z "$parent" ]; then
+                parent="$object"
+            else
+                parent="$parent $object"
+            fi
+        else
+            error_insane "parent parameter could not be resolved into commit"
+        fi
+    done
+    echo "$parent"
+}
+
+author_line(){
+    local key="$1"
+    local line="$2"; line=`printf '%s' "$line"`
+    local author=""
+    local date="${line#$key }"
+    local new_author
+
+    until \
+        [ -z "$date" ] ||
+        printf '%s' "$date" | grep -q '^ *[0-9]*  *\([-+][0-9]\{4\}\)\? *$' ||
+        date -d "$date" >/dev/null 2>&1
+    do
+        [ -n "$author" ] && author="$author "
+        author="$author"`printf '%s' "$date"|sed \
+                -e 's/^ *//' \
+                -e 's/ *$//' \
+                -e 's/^\([^ ][^ ]*\)\(  *.*\|\)$/\1/'`
+        date=`printf '%s' "$date"|sed \
+                -e 's/^ *//' \
+                -e 's/ *$//' \
+                -e 's/^[^ ][^ ]*\(  *\|$\)//'`
+    done
+
+    if [ -z "$date" ]; then
+        date=`date +'%s %z'`
+    elif date -d "$date" >/dev/null 2>&1; then
+        date=`date -d "$date" +'%s %z'`
+    fi
+
+    if printf '%s' "$author" | grep -v -q '^[^<][^<]* <[^>]*>$'; then
+        new_author=`git log -1 --all --pretty='format:%aN <%aE>' --author="$author"`
+        if [ -z "$new_author" ]; then
+            new_author=`git log -1 --all --pretty='format:%cN <%cE>' --committer="$author"`
+        fi
+        if [ -z "$new_author" ]; then
+            error_insane "Unable to determine author based on author line $line, $author, $date"
+        fi
+        author="$new_author"
+    fi
+
+    printf '%s' "$author $date"
+}
+
+headers(){
+    echo "tree $tree"
+    echo -n "parent "
+    echo "$parent" | sed 's/ /\nparent /g'
+    echo "author $author"
+    echo "committer $committer"
+    echo
+}
+
+in_message=0
+in_message_body=0
+tree=
+parents=
+while read line; do
+    line=`printf '%s' "$line"|sed 's/\s*$//'`
+    [ $in_message_body -eq 1 ] && printf '%s\n' "$line" && continue
+    if [ $in_message -eq 1 -a -n "$line" ]; then
+            in_message_body=1
+            headers
+            printf '%s\n' "$line"
+            continue
+    fi
+#    git log --author='wpalmer <wpalmer@' -1 --pretty='format:%aN <%aE>' --all
+
+    if [ ! "${line#tree }" = "$line" ]; then
+        if [ -n "$tree" ]; then
+            error_insane "multiple trees specified"
+        fi
+        tree=`tree_line "$line"`
+        continue
+    fi
+
+    if [ ! "${line#parent }" = "$line" ]; then
+        if [ -n "$parent" ]; then
+            parent="$parent "`parent_line "$line"`
+        else
+            parent=`parent_line "$line"`
+        fi
+        continue
+    fi
+
+    if [ ! "${line#author }" = "$line" ]; then
+        if [ -n "$author" ]; then
+            error_insane "multiple authors specified"
+        else
+            author=`author_line 'author' "$line"`
+            [ -z "$author" ] && exit 1
+        fi
+        continue
+    fi
+
+    if [ ! "${line#committer }" = "$line" ]; then
+        if [ -n "$committer" ]; then
+            error_insane "multiple committers specified"
+        else
+            committer=`author_line 'committer' "$line"`
+            [ -z "$committer" ] && exit 1
+        fi
+        continue
+    fi
+
+    if [ -z "$line" ]; then
+        # ignore leading blank lines
+        in_message=1
+        continue
+    fi
+
+    headers
+    printf '%s' "$line"
+    in_message_body=1
+done | sed -e :a -e '/^\n*$/{$d;N;ba' -e '}'
