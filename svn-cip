@@ -230,6 +230,7 @@ function update_index(){
 function commit(){
     local tree="$1"
     local parent="$2"
+    local message="$3"
     local date="$(date +'%s %z')"
 
     [ -n "$parent" ] && parent="$(echo; echo "parent $parent")"
@@ -240,7 +241,7 @@ function commit(){
             author nobody <nobody@nowhere> $date
             committer nobody <nobody@nowhere> $date
 
-            PARTIAL
+            $message
 COMMIT
     } | git hash-object -t commit -w --stdin
 }
@@ -248,15 +249,15 @@ COMMIT
 filepaths "${files[@]}" | while read -d $'\0' file; do
     update_index hash_svn_base "$file" || exit 1
 done &&
-git reset -q "$(commit "$(git write-tree)")" &&
+git reset -q "$(commit "$(git write-tree)" '' 'BASE')" &&
 git tag base &&
 git add --patch &&
-git reset -q "$(commit "$(git write-tree)" "$(git rev-parse refs/tags/base)")" &&
+git reset -q "$(commit "$(git write-tree)" "$(git rev-parse refs/tags/base)" 'PARTIAL')" &&
 git tag partial &&
 filepaths "${files[@]}" | while read -d $'\0' file; do
     update_index hash_file "$file" || exit 1
 done &&
-git reset -q "$(commit "$(git write-tree)" "$(git rev-parse refs/tags/base)")" &&
+git reset -q "$(commit "$(git write-tree)" "$(git rev-parse refs/tags/base)" 'FULL')" &&
 git tag full || exit 1
 
 if git diff --quiet refs/tags/base refs/tags/partial; then
@@ -290,7 +291,7 @@ while true; do
             git reset -q refs/tags/partial &&
             git reset -q --soft refs/tags/base &&
             git reset --patch &&
-            git reset -q "$(commit "$(git write-tree)" "$(git rev-parse refs/tags/base)")" &&
+            git reset -q "$(commit "$(git write-tree)" "$(git rev-parse refs/tags/base)" 'PARTIAL')" &&
             git update-ref refs/tags/partial HEAD || exit 1
             continue
             ;;
@@ -298,7 +299,7 @@ while true; do
             git reset -q refs/tags/partial &&
             git reset -q --soft refs/tags/base &&
             git add --patch &&
-            git reset -q "$(commit "$(git write-tree)" "$(git rev-parse refs/tags/base)")" &&
+            git reset -q "$(commit "$(git write-tree)" "$(git rev-parse refs/tags/base)" 'PARTIAL')" &&
             git update-ref refs/tags/partial HEAD || exit 1
             continue
             ;;
