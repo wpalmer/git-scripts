@@ -5,6 +5,7 @@
 #   - fields are put into their usual order (tree, parents, author, committer, message)
 #   - tree and parents are run through rev-parse
 #   - parents are separated into one per parent line
+#   - if only one of author or committer is specified, use the values of one for both fields
 #   - author/committer name is seareched for as with --author=/--committer= in git log
 #   - date in author/committer lines is run trough strtotime if possible/required
 #   - the current date is used if no date is given
@@ -129,6 +130,23 @@ author_line(){
 }
 
 headers(){
+    did_output_headers=1
+    if [ -z "$tree" ]; then
+        error_insane "Reached end of headers without being able to determine tree"
+    fi
+
+    if [ -z "$committer" ]; then
+        committer="$author"
+    fi
+
+    if [ -z "$author" ]; then
+        author="$committer"
+    fi
+
+    if [ -z "$author" ]; then
+        error_insane "Reached end of headers without being able to determine author and/or committer"
+    fi
+
     echo "tree $tree"
     echo -n "parent "
     echo "$parent" | sed 's/ /\nparent /g'
@@ -137,6 +155,7 @@ headers(){
     echo
 }
 
+did_output_headers=0
 in_message=0
 in_message_body=0
 tree=
@@ -150,7 +169,6 @@ while read line; do
             printf '%s\n' "$line"
             continue
     fi
-#    git log --author='wpalmer <wpalmer@' -1 --pretty='format:%aN <%aE>' --all
 
     if [ ! "${line#tree }" = "$line" ]; then
         if [ -n "$tree" ]; then
@@ -195,7 +213,11 @@ while read line; do
         continue
     fi
 
+    in_message_body=1
     headers
     printf '%s' "$line"
-    in_message_body=1
 done | sed -e :a -e '/^\n*$/{$d;N;ba' -e '}'
+
+if [ $did_output_headers -eq 0 ]; then
+    error_insane "no commit message specified"
+fi
