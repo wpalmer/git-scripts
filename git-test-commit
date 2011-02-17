@@ -1,0 +1,52 @@
+#!/bin/sh
+if [ $# -lt 1 -o $# -gt 3 ]; then
+	echo 'Usage: git test-commit <filename> [<content> [<message>]]' >&2
+	exit 1
+fi
+
+if git rev-parse --is-inside-work-tree >/dev/null >&1; then
+	if [ `git rev-parse --is-inside-work-tree` = false ]; then
+		echo "Must be run from within a git work-tree" >&2
+		exit 1
+	fi
+else
+	exit 1
+fi
+
+file="$1"
+if [ $# -gt 1 ]; then
+	content="$2"
+else
+	content="$file"
+fi
+
+GIT_INDEX=`mktemp -t git-test-commit.XXXXXXXXXX`
+GIT_AUTHOR_NAME='test'
+GIT_AUTHOR_EMAIL='nobody@localhost'
+[ -n "$GIT_INDEX" -a -w "$GIT_INDEX" ] || exit 1
+_cleanup(){ rm -f "$GIT_INDEX"; }
+trap _cleanup INT HUP TERM EXIT
+
+export GIT_INDEX GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL
+
+if git show-ref --quiet --head; then
+	git read-tree HEAD: || exit 1	
+else
+	git read-tree --empty || exit 1
+fi
+git update-index --add --cacheinfo 100644 `(
+	if git cat-file -t "HEAD:$file" >/dev/null 2>&1; then
+		git cat-file blob "HEAD:$file" 2>/dev/null
+	fi
+	printf '%s\n' "$content"
+) | git hash-object -t blob -w --stdin` "$file"
+
+if [ $# -gt 2 ]; then
+	message="$3"
+elif git cat-file -t "HEAD:$file" >/dev/null 2>&1; then
+	message="appended to $file"
+else
+	message="added $file"
+fi
+
+git commit --quiet -m "$message"
