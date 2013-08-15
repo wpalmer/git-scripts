@@ -1,0 +1,15 @@
+#!/bin/bash
+TEMP="$(mktemp --tmpdir -d 'git-bare.XXXXXXXXXX')"
+[ -n "$TEMP" -a -d "$TEMP" -a -w "$TEMP" ] || exit 1
+_cleanup(){ rm -rf "$TEMP"; }
+trap _cleanup EXIT
+
+[ $# -gt 2 ] || {
+	echo "usage: git bare <GIT_DIR> <treeish> <git command...>" >&2
+}
+
+export GIT_INDEX_FILE="$TEMP/index"
+export GIT_WORK_TREE="$(readlink -f "$(pwd)")"
+export GIT_DIR="$(readlink -f "$1")"; shift
+git read-tree "$1"; shift
+exec git "$@"
