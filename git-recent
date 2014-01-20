@@ -1,0 +1,7 @@
+#!/bin/bash
+git for-each-ref \
+	--sort -committerdate \
+	--count=10 \
+	--format='%(committerdate:iso8601) [%(objectname:short) %(authorname)] %(refname:short)' \
+	"$@" |
+	tac
