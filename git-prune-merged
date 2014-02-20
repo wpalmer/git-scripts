@@ -1,0 +1,193 @@
+#!/bin/bash
+usage(){
+	sed 's/^..//' <<USAGE
+		usage: git prune-merged <remote> [--mainline=<revision>] [--prefix=<prefix>]
+
+		Removes (from the specified remote) branches whose tips are reachable from the mainline.
+
+		<remote> is optional if there is exactly one remote configured for the current repository.
+
+		Options:
+
+			-n, --simulate
+
+			Do not actually delete anything, just list what would be deleted
+
+			--remote
+
+			Delete from the server instead of locally
+			If both --remote and --local are specified, branches are deleted from both
+
+			--local
+
+			Delete locally instead of from the server (default).
+			If both --remote and --local are specified, branches are deleted from both
+
+			--mainline=<revision>
+
+			Specifies the revision to use as the mainline.
+			Defaults to refs/remotes/<remote>/master
+			If pruneRemote.mainline is configured, that will be used.
+
+			--prefix=<prefix>
+
+			Only consider remote branches beginning with the prefix <prefix>.
+			If pruneRemote.prefix is configured, that will be used.
+
+			--ignore=<ref> [<ref>...]
+
+			Never consider the ref <ref>. Use this to ensure that certain refs
+			never get deleted. Specify the complete ref, eg:
+			  refs/remotes/foo/bar
+
+			Multiple refs may be listed, seperated by spaces.
+			If pruneRemote.ignore is configured, that will be added to the list.
+USAGE
+}
+
+pretend(){
+	printf '+ ' >&2
+	printf '%q ' "$@" >&2
+	printf '\n' >&2
+}
+
+current="$(git symbolic-ref HEAD)"
+[ -n "$current" ] || { printf 'Refusing to prune-merged with a detached HEAD\n' >&2; exit 1; }
+
+remote=
+mainline="$(git config pruneRemote.mainline)"
+prefix="$(git config pruneRemote.prefix)"
+ignore="$current $(git config pruneRemote.ignore)"
+do_simulate=0
+do_local=
+do_remote=
+
+while [ $# -gt 0 ]; do
+	arg="$1"; shift
+
+	case "$arg" in
+		-n|--simulate)
+			do_simulate=1
+			;;
+		--mainline=*)
+			mainline="${arg#*=}"
+			;;
+		--prefix=*)
+			prefix="${arg#*=}"
+			;;
+		--ignore=*)
+			[ -n "$ignore" ] && ignore="$ignore "
+			ignore="$ignore${arg#*=}"
+			;;
+		--local)
+			do_local=1
+			;;
+		--remote)
+			do_remote=1
+			;;
+		--help)
+			usage
+			exit
+			;;
+		*)
+			if [ -z "$remote" ]; then
+				remote="$arg"
+			else
+				printf "Unknown argument '%s'\n" "$arg" >&2
+				usage >&2
+				exit 1
+			fi
+			;;
+	esac
+done
+
+if [ -z "$do_local" ] && [ "$do_remote" = "1" ]; then
+	do_local=0
+fi
+
+if [ -z "$do_remote" ] && [ "$do_local" = "1" ]; then
+	do_remote=0
+fi
+
+if [ -z "$do_local" ] && [ -z "$do_remote" ]; then
+	do_local=1
+	do_remote=0
+fi
+
+if [ -z "$remote" ]; then
+	remote="$(git remote)"
+	if [ "$remote" != "$(head -n 1 <<<"$remote")" ]; then
+		printf 'You must specify a remote\n' >&2
+		exit 1
+	fi
+fi
+
+[ -z "$mainline" ] && mainline="${mainline:-refs/remotes/$remote/master}"
+
+ignored=()
+while read ref; do
+	[ -n "$(sed 's/\s\s*//g' <<<"$ref")" ] || continue
+	ignored=( "${ignored[@]}" "$ref" )
+done < <( sed 's/\s\s*/\n/g' <<<"$ignore" )
+
+if [ $do_local -eq 1 ]; then
+	merged=()
+	while read hash type ref; do
+		[ "$ref" != "$mainline" ] || continue
+
+		do_ignore=0
+		for ignored_ref in "${ignored[@]}"; do
+			if [ "$ref" = "$ignored_ref" ]; then
+				do_ignore=1
+				break
+			fi
+		done
+		[ $do_ignore -eq 0 ] || continue
+
+		if [ -z "$(git rev-list -n 1 "$ref" "^$mainline")" ]; then
+			merged=( "${merged[@]}" "$ref" )
+		fi
+	done < <( git for-each-ref "refs/heads/$prefix" )
+
+	if [ ${#merged[@]} -gt 0 ]; then
+		if [ $do_simulate -eq 1 ]; then
+			for ref in "${merged[@]}"; do
+				pretend git update-ref -d "$ref"
+			done
+		else
+			for ref in "${merged[@]}"; do
+				git update-ref -d "$ref"
+			done
+		fi
+	fi
+fi
+
+if [ $do_remote -eq 1 ]; then
+	remote_merged=()
+	while read hash type ref; do
+		[ "$ref" != "refs/remotes/$remote/HEAD" ] || continue
+		[ "$ref" != "$mainline" ] || continue
+
+		do_ignore=0
+		for ignored_ref in "${ignored[@]}"; do
+			if [ "$ref" = "$ignored_ref" ]; then
+				do_ignore=1
+				break
+			fi
+		done
+		[ $do_ignore -eq 0 ] || continue
+
+		branch="${ref#refs/remotes/$remote/}"
+		if [ -z "$(git rev-list -n 1 "$ref" "^$mainline")" ]; then
+			remote_merged=( "${remote_merged[@]}" ":refs/heads/$branch" )
+		fi
+	done < <( git for-each-ref "refs/remotes/$remote/$prefix" )
+
+	if [ ${#remote_merged[@]} -gt 0 ]; then
+		if [ $do_simulate -eq 1 ]; then
+			pretend git push "$remote" "${remote_merged[@]}" >&2
+		else
+			git push "$remote" "${remote_merged[@]}"
+		fi
+	fi
+fi
